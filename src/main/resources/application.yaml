@@ -31,3 +31,7 @@ spring:
 logging:
   level:
     org.flywaydb: DEBUG
+
+github:
+  api:
+    token: ${GITHUB_API_TOKEN:}
