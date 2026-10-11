@@ -35,3 +35,8 @@ logging:
 github:
   api:
     token: ${GITHUB_API_TOKEN:}
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+

@@ -1,6 +1,11 @@
 package com.evan.opensourcepulsebe.issue;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.util.Collection;
 import java.util.List;
@@ -9,7 +14,7 @@ import java.util.Optional;
 /**
  * Spring Data JPA Repository for Issue entity.
  */
-public interface IssueRepository extends JpaRepository<Issue, Long> {
+public interface IssueRepository extends JpaRepository<Issue, Long>, JpaSpecificationExecutor<Issue> {
 
     Optional<Issue> findByGithubId(Long githubId);
 
@@ -20,4 +25,10 @@ public interface IssueRepository extends JpaRepository<Issue, Long> {
 
     // Fetch all tracked issues for a specific repository
     List<Issue> findByRepositoryIdOrderByCreatedAtDesc(Long repositoryId);
+
+    // Dynamic search with pagination — fetches the lazy repository association in 1 query (no N+1)
+    @Override
+    @EntityGraph(attributePaths = {"repository"})
+    Page<Issue> findAll(Specification<Issue> spec, Pageable pageable);
 }
+

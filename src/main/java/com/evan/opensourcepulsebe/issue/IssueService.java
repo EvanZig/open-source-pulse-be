@@ -1,10 +1,14 @@
 package com.evan.opensourcepulsebe.issue;
 
 import com.evan.opensourcepulsebe.github.dto.GitHubIssueItem;
+import com.evan.opensourcepulsebe.issue.dto.IssueSummaryResponse;
 import com.evan.opensourcepulsebe.issue.mapper.IssueMapper;
 import com.evan.opensourcepulsebe.repository.GitHubRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +22,21 @@ public class IssueService {
 
     private final IssueRepository issueRepository;
     private final IssueMapper issueMapper;
+
+    @Transactional(readOnly = true)
+    public Page<IssueSummaryResponse> searchIssues(String language, String label, String search, Pageable pageable) {
+        Specification<Issue> spec = IssueSpecification.withFilters(language, label, search);
+        return issueRepository.findAll(spec, pageable)
+                .map(issueMapper::toSummaryResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public IssueSummaryResponse findById(Long id) {
+        return issueRepository.findById(id)
+                .map(issueMapper::toSummaryResponse)
+                .orElseThrow(() -> new IllegalArgumentException("Issue not found with id: " + id));
+    }
+
 
     @Transactional
     public void upsertAll(List<GitHubIssueItem> items, Map<String, GitHubRepository> repoCache) {

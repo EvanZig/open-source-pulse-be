@@ -11,16 +11,19 @@ import org.mapstruct.Named;
 import org.mapstruct.ReportingPolicy;
 
 import java.time.Instant;
+
+import com.evan.opensourcepulsebe.issue.dto.IssueSummaryResponse;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-@Mapper(
-        componentModel = "spring",
-        unmappedTargetPolicy = ReportingPolicy.ERROR,
-        imports = {Instant.class}
-)
+@Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.ERROR, imports = {Instant.class})
 public interface IssueMapper {
+
+    IssueSummaryResponse toSummaryResponse(Issue entity);
+
+    IssueSummaryResponse.RepositorySummary toRepositorySummary(GitHubRepository repository);
 
     @Mapping(target = "id", ignore = true) // DB generated
     @Mapping(target = "githubId", source = "dto.id")
@@ -55,20 +58,24 @@ public interface IssueMapper {
 
     @Named("truncate500")
     default String truncate500(String text) {
-        if (text == null) return null;
+        if (text == null)
+            return null;
         return text.length() > 500 ? text.substring(0, 500) : text;
     }
 
     @Named("truncate5000")
     default String truncate5000(String text) {
-        if (text == null) return null;
+        if (text == null)
+            return null;
         return text.length() > 5000 ? text.substring(0, 5000) : text;
     }
 
-    // Must return a mutable list: on update MapStruct calls clear()/addAll() on the entity's existing list.
+    // Must return a mutable list: on update MapStruct calls clear()/addAll() on the
+    // entity's existing list.
     @Named("mapLabels")
     default List<String> mapLabels(List<GitHubLabelItem> labels) {
-        if (labels == null) return new ArrayList<>();
+        if (labels == null)
+            return new ArrayList<>();
         return labels.stream()
                 .map(GitHubLabelItem::name)
                 .collect(Collectors.toCollection(ArrayList::new));
