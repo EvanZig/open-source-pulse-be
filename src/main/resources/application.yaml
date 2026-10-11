@@ -28,6 +28,20 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 500ms
+      connect-timeout: 500ms
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 6h
+      key-prefix: "osspulse:"
+      cache-null-values: false
+
 logging:
   level:
     org.flywaydb: DEBUG

@@ -1,5 +1,7 @@
 package com.evan.opensourcepulsebe.github;
 
+import com.evan.opensourcepulsebe.exception.GitHubApiException;
+import com.evan.opensourcepulsebe.exception.GitHubRateLimitException;
 import com.evan.opensourcepulsebe.github.dto.GitHubIssueItem;
 import com.evan.opensourcepulsebe.github.dto.GitHubSearchResponse;
 import com.evan.opensourcepulsebe.issue.IssueService;
@@ -7,16 +9,15 @@ import com.evan.opensourcepulsebe.repository.GitHubRepository;
 import com.evan.opensourcepulsebe.repository.GitHubRepositoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * Orchestrates the scheduled GitHub sync.
- * The domain services handle their own transactions.
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -26,17 +27,30 @@ public class GitHubSyncService {
     private final GitHubRepositoryService repositoryService;
     private final IssueService issueService;
 
+    @Value("${github.api.token:}")
+    private String githubApiToken;
+
     private static final String SEARCH_QUERY = "is:issue is:open no:assignee stars:>=1000 comments:1..10";
 
-    /**
-     * Entry point — runs every 6 hours with a 10-second startup delay.
-     */
+    private static final int MAX_PAGES = 10;
+    private static final int PER_PAGE = 100;
+    private static final long PAGE_DELAY_MS = 7_000;
+    private static final Duration MAX_RATE_LIMIT_WAIT = Duration.ofSeconds(90);
+
     @Scheduled(fixedRate = 6 * 60 * 60 * 1000, initialDelay = 10_000)
     public void syncBeginnerFriendlyIssues() {
-        log.info("Starting scheduled GitHub sync...");
+        boolean authenticated = githubApiToken != null && !githubApiToken.isBlank();
+        if (authenticated) {
+            log.info("Starting scheduled GitHub sync WITH token (length={})", githubApiToken.length());
+        } else {
+            log.warn("Starting scheduled GitHub sync WITHOUT token — Search API limit is 10 req/min");
+        }
+
+        Instant syncStartedAt = Instant.now();
 
         try {
-            List<GitHubIssueItem> allIssues = fetchAllPages();
+            FetchResult result = fetchAllPages();
+            List<GitHubIssueItem> allIssues = result.issues();
 
             if (allIssues.isEmpty()) {
                 log.info("No issues found from GitHub.");
@@ -45,61 +59,83 @@ public class GitHubSyncService {
 
             Map<String, GitHubRepository> repoCache = resolveRepositories(allIssues);
 
-            issueService.upsertAll(allIssues, repoCache);
+            issueService.upsertAll(allIssues, repoCache, syncStartedAt);
 
-            log.info("Sync complete. Processed {} issues.", allIssues.size());
+            if (result.complete()) {
+                issueService.deleteStaleIssues(syncStartedAt);
+                log.info("Sync complete. Processed {} issues.", allIssues.size());
+            } else {
+                log.warn("Sync partially complete. Processed {} issues before GitHub stopped responding; "
+                        + "skipped stale prune.", allIssues.size());
+            }
 
         } catch (Exception e) {
             log.error("Scheduled GitHub sync failed: {}", e.getMessage(), e);
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Step 1: Fetch from GitHub
-    // ─────────────────────────────────────────────────────────────────────
-
-    /**
-     * Results are de-duplicated by GitHub id: the search ranking shifts between
-     * page
-     * requests, so the same issue can appear on two pages, which would otherwise
-     * produce two INSERTs and violate uk_issues_github_id.
-     */
-    private List<GitHubIssueItem> fetchAllPages() {
+    private FetchResult fetchAllPages() {
         Map<Long, GitHubIssueItem> allIssues = new LinkedHashMap<>();
-        boolean hasMorePages = true;
 
-        for (int page = 1; page <= 10 && hasMorePages; page++) {
-            GitHubSearchResponse response = gitHubClient.searchOpenIssues(
-                    SEARCH_QUERY, "interactions", "desc", 100, page);
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            if (page > 1) {
+                sleep(PAGE_DELAY_MS);
+            }
+
+            GitHubSearchResponse response;
+            try {
+                response = fetchPage(page);
+            } catch (GitHubApiException e) {
+                if (allIssues.isEmpty()) {
+                    throw e;
+                }
+                log.warn("Stopping at page {} ({}). Persisting {} issues already fetched.",
+                        page, e.getMessage(), allIssues.size());
+                return new FetchResult(new ArrayList<>(allIssues.values()), false);
+            }
 
             List<GitHubIssueItem> pageItems = response.items();
-
             if (pageItems == null || pageItems.isEmpty()) {
-                hasMorePages = false;
-            } else {
-                pageItems.forEach(item -> allIssues.putIfAbsent(item.id(), item));
-                log.info("Fetched page {}: {} issues (total so far: {})",
-                        page, pageItems.size(), allIssues.size());
+                break;
+            }
 
-                hasMorePages = pageItems.size() == 100;
+            pageItems.forEach(item -> allIssues.putIfAbsent(item.id(), item));
 
-                if (hasMorePages) {
-                    sleep(5000);
-                }
+            int reportedTotal = response.totalCount() != null ? response.totalCount() : 0;
+            log.info("Fetched page {}: {} issues (unique so far: {}, GitHub total_count: {})",
+                    page, pageItems.size(), allIssues.size(), reportedTotal);
+
+            int maxResults = MAX_PAGES * PER_PAGE;
+            int fetchCap = reportedTotal > 0 ? Math.min(reportedTotal, maxResults) : maxResults;
+            if (allIssues.size() >= fetchCap) {
+                break;
             }
         }
 
-        return new ArrayList<>(allIssues.values());
+        return new FetchResult(new ArrayList<>(allIssues.values()), true);
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // Step 2: Resolve repositories
-    // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * Extracts unique owner/name pairs from the issues and resolves each
-     * to a GitHubRepository entity (from DB or GitHub API).
-     */
+    private GitHubSearchResponse fetchPage(int page) {
+        try {
+            return gitHubClient.searchOpenIssues(SEARCH_QUERY, "interactions", "desc", PER_PAGE, page);
+        } catch (GitHubRateLimitException e) {
+            Duration wait = Duration.between(Instant.now(), e.getRetryAt()).plusSeconds(1);
+            if (wait.isNegative()) {
+                wait = Duration.ofSeconds(1);
+            }
+            if (wait.compareTo(MAX_RATE_LIMIT_WAIT) > 0) {
+                throw e;
+            }
+            log.info("Rate limited on page {}; waiting {}s before retrying.", page, wait.toSeconds());
+            sleep(wait.toMillis());
+            return gitHubClient.searchOpenIssues(SEARCH_QUERY, "interactions", "desc", PER_PAGE, page);
+        }
+    }
+
+    private record FetchResult(List<GitHubIssueItem> issues, boolean complete) {
+    }
+
     private Map<String, GitHubRepository> resolveRepositories(List<GitHubIssueItem> items) {
         Set<String> uniqueRepoKeys = items.stream()
                 .map(item -> extractRepoKey(item.repositoryUrl()))

@@ -73,6 +73,9 @@ public class Issue {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "last_seen_at", nullable = false)
+    private Instant lastSeenAt;
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

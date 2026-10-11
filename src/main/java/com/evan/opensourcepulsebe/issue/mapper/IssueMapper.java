@@ -39,6 +39,7 @@ public interface IssueMapper {
     @Mapping(target = "labels", source = "dto.labels", qualifiedByName = "mapLabels")
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "lastSeenAt", ignore = true) 
     Issue toEntity(GitHubIssueItem dto, GitHubRepository repository);
 
     @Mapping(target = "id", ignore = true)
@@ -49,6 +50,7 @@ public interface IssueMapper {
     @Mapping(target = "githubCreatedAt", ignore = true) // shouldn't change
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "lastSeenAt", ignore = true) 
     @Mapping(target = "title", source = "title", qualifiedByName = "truncate500")
     @Mapping(target = "bodySnippet", source = "body", qualifiedByName = "truncate5000")
     @Mapping(target = "commentsCount", source = "comments", defaultValue = "0")
