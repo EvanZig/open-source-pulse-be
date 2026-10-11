@@ -70,7 +70,7 @@ public class GitHubSyncService {
 
         for (int page = 1; page <= 10 && hasMorePages; page++) {
             GitHubSearchResponse response = gitHubClient.searchOpenIssues(
-                    SEARCH_QUERY, "interactions", "desc", 50, page);
+                    SEARCH_QUERY, "interactions", "desc", 100, page);
 
             List<GitHubIssueItem> pageItems = response.items();
 
@@ -81,10 +81,10 @@ public class GitHubSyncService {
                 log.info("Fetched page {}: {} issues (total so far: {})",
                         page, pageItems.size(), allIssues.size());
 
-                hasMorePages = pageItems.size() == 50;
+                hasMorePages = pageItems.size() == 100;
 
                 if (hasMorePages) {
-                    sleep(2000);
+                    sleep(5000);
                 }
             }
         }
