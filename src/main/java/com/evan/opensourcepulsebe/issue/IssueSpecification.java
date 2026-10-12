@@ -46,7 +46,7 @@ public final class IssueSpecification {
                     Integer.class,
                     root.get("labels"),
                     cb.literal(label.trim()));
-            return cb.isNotNull(pos);
+            return cb.greaterThan(pos, 0);
         };
     }
 
