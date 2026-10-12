@@ -35,8 +35,8 @@ public class GlobalExceptionHandler {
     }
 
     // ── Resource not found ───────────────────────────────────────────────
-    @ExceptionHandler(NoResourceFoundException.class)
-    public ResponseEntity<ApiErrorResponse> handleNotFound(NoResourceFoundException ex,
+    @ExceptionHandler({NoResourceFoundException.class, ResourceNotFoundException.class})
+    public ResponseEntity<ApiErrorResponse> handleNotFound(Exception ex,
                                                            HttpServletRequest req) {
         return buildResponse(HttpStatus.NOT_FOUND, ex.getMessage(), req);
     }

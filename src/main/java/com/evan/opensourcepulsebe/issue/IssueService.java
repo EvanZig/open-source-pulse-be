@@ -2,6 +2,7 @@ package com.evan.opensourcepulsebe.issue;
 
 import com.evan.opensourcepulsebe.common.dto.PagedResponse;
 import com.evan.opensourcepulsebe.config.CacheNames;
+import com.evan.opensourcepulsebe.exception.ResourceNotFoundException;
 import com.evan.opensourcepulsebe.github.dto.GitHubIssueItem;
 import com.evan.opensourcepulsebe.issue.dto.IssueSummaryResponse;
 import com.evan.opensourcepulsebe.issue.mapper.IssueMapper;
@@ -42,7 +43,7 @@ public class IssueService {
     public IssueSummaryResponse findById(Long id) {
         return issueRepository.findById(id)
                 .map(issueMapper::toSummaryResponse)
-                .orElseThrow(() -> new IllegalArgumentException("Issue not found with id: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Issue not found with id: " + id));
     }
 
     @CacheEvict(cacheNames = {CacheNames.ISSUE_SEARCH, CacheNames.ISSUE_BY_ID}, allEntries = true)
