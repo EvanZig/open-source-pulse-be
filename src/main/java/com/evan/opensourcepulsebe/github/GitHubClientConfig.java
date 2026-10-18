@@ -39,13 +39,14 @@ public class GitHubClientConfig {
                 .defaultHeader("User-Agent", "OpenSourcePulse-BE")
 
                 .defaultStatusHandler(HttpStatusCode::is4xxClientError, (req, res) -> {
-                    Instant retryAt = rateLimitRetryAt(res.getStatusCode(), res.getHeaders());
-                    if (retryAt != null) {
-                        log.warn("GitHub rate limit hit ({}), retry allowed at {}", res.getStatusCode(), retryAt);
-                        throw new GitHubRateLimitException(
-                                "GitHub rate limit exceeded, retry at " + retryAt, retryAt);
-                    }
                     String body = readBodySafely(res.getBody());
+                    Instant retryAt = rateLimitRetryAt(res.getStatusCode(), res.getHeaders(), body);
+                    if (retryAt != null) {
+                        log.warn("GitHub rate limit hit ({}), retry allowed at {}. Response: {}",
+                                res.getStatusCode(), retryAt, abbreviate(body));
+                        throw new GitHubRateLimitException(
+                                "GitHub rate limit exceeded, retry at " + retryAt + ": " + abbreviate(body), retryAt);
+                    }
                     log.error("GitHub API client error: {} {} — {}",
                             res.getStatusCode(), res.getStatusText(), body);
                     throw new GitHubApiException(
@@ -75,23 +76,48 @@ public class GitHubClientConfig {
         return factory.createClient(GitHubClient.class);
     }
 
-    private static Instant rateLimitRetryAt(HttpStatusCode status, HttpHeaders headers) {
+    private static Instant rateLimitRetryAt(HttpStatusCode status, HttpHeaders headers, String body) {
         if (status.value() != 403 && status.value() != 429) {
             return null;
         }
 
-        String retryAfter = headers.getFirst("Retry-After");
-        if (retryAfter != null) {
-            return Instant.now().plusSeconds(Long.parseLong(retryAfter.trim()));
+        // 1. Explicit Retry-After header (seconds)
+        Long retryAfterSeconds = parseLongSafely(headers.getFirst("Retry-After"));
+        if (retryAfterSeconds != null) {
+            return Instant.now().plusSeconds(retryAfterSeconds);
         }
 
+        // 2. Primary rate limit exhausted (x-ratelimit-remaining == 0)
         if ("0".equals(headers.getFirst("x-ratelimit-remaining"))) {
-            String reset = headers.getFirst("x-ratelimit-reset");
-            if (reset != null) {
-                return Instant.ofEpochSecond(Long.parseLong(reset.trim()));
+            Long resetEpochSeconds = parseLongSafely(headers.getFirst("x-ratelimit-reset"));
+            if (resetEpochSeconds != null) {
+                return Instant.ofEpochSecond(resetEpochSeconds);
             }
         }
+
+        // 3. Secondary rate limit (HTTP 429 or HTTP 403 with secondary rate limit body)
+        if (status.value() == 429 || isSecondaryRateLimit(body)) {
+            // GitHub recommendation for secondary rate limits when no Retry-After is supplied: wait 60s
+            return Instant.now().plusSeconds(60);
+        }
+
         return null;
+    }
+
+    private static boolean isSecondaryRateLimit(String body) {
+        return body != null && body.toLowerCase().contains("secondary rate limit");
+    }
+
+    private static Long parseLongSafely(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            log.debug("Ignoring unparseable rate-limit header value '{}'", value);
+            return null;
+        }
     }
 
     private static String readBodySafely(java.io.InputStream body) {
