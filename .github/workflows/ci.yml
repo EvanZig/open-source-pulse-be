@@ -56,3 +56,36 @@ jobs:
       - name: Compile & execute tests
         run: ./mvnw --batch-mode --no-transfer-progress clean test
 
+      - name: Report JaCoCo Code Coverage
+        run: |
+          CSV="target/site/jacoco/jacoco.csv"
+          if [ ! -f "$CSV" ]; then
+            echo "::warning title=JaCoCo Coverage::Coverage report not found at $CSV"
+            exit 0
+          fi
+
+          awk -F',' '
+          NR > 1 {
+            missed += $8
+            covered += $9
+          }
+          END {
+            total = missed + covered
+            pct = (total > 0) ? (covered / total) * 100 : 0
+            printf "Lines Covered: %d / %d (%.1f%%)\n", covered, total, pct
+
+            # Write Markdown summary to GitHub Actions UI
+            printf "### 📊 JaCoCo Test Coverage\n\n" >> ENVIRON["GITHUB_STEP_SUMMARY"]
+            printf "| Metric | Value |\n| :--- | :--- |\n" >> ENVIRON["GITHUB_STEP_SUMMARY"]
+            printf "| **Line Coverage** | **%.1f%%** (%d / %d lines) |\n", pct, covered, total >> ENVIRON["GITHUB_STEP_SUMMARY"]
+            printf "| **Target Threshold** | 70.0%% |\n\n" >> ENVIRON["GITHUB_STEP_SUMMARY"]
+
+            if (pct < 70.0) {
+              printf "::warning title=Test Coverage Below 70%%::Line coverage is %.1f%% (%d/%d lines), which is below the 70.0%% target.\n", pct, covered, total
+              printf "> ⚠️ **Warning:** Line coverage (`%.1f%%`) is below the `70.0%%` target.\n", pct >> ENVIRON["GITHUB_STEP_SUMMARY"]
+            } else {
+              printf "::notice title=Test Coverage::Line coverage is %.1f%% (%d/%d lines) — meets the 70.0%% target!\n", pct, covered, total
+              printf "> ✅ **Passed:** Line coverage (`%.1f%%`) meets the `70.0%%` target.\n", pct >> ENVIRON["GITHUB_STEP_SUMMARY"]
+            }
+          }' "$CSV"
+
